@@ -1,6 +1,40 @@
 services:
-  web:
-    build: .
-    container_name: hello-docker
+  frontend:
+    build: ./frontend
+    container_name: hello-docker-frontend
     ports:
       - "8080:80"
+
+  backend:
+    build: ./backend
+    container_name: hello-docker-backend
+    ports:
+      - "3001:3000"
+    environment:
+      PORT: 3000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: hello
+      DB_PASSWORD: hello123
+      DB_NAME: hello_docker
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    container_name: hello-docker-db
+    environment:
+      POSTGRES_USER: hello
+      POSTGRES_PASSWORD: hello123
+      POSTGRES_DB: hello_docker
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hello -d hello_docker"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:

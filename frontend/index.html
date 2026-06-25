@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hello Docker Frontend</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: #f5f7fb;
+      color: #1f2937;
+    }
+
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 32px 16px 48px;
+    }
+
+    h1 {
+      margin-bottom: 8px;
+    }
+
+    .card {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      margin-top: 20px;
+    }
+
+    form {
+      display: grid;
+      gap: 12px;
+    }
+
+    input,
+    textarea,
+    button {
+      font: inherit;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+    }
+
+    textarea {
+      min-height: 96px;
+      resize: vertical;
+    }
+
+    button {
+      width: fit-content;
+      background: #2563eb;
+      color: #ffffff;
+      border: none;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.7;
+      cursor: progress;
+    }
+
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 16px 0 0;
+      display: grid;
+      gap: 12px;
+    }
+
+    li {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 14px;
+      background: #fafafa;
+    }
+
+    .meta {
+      color: #6b7280;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .status {
+      margin-top: 12px;
+      min-height: 24px;
+      color: #2563eb;
+    }
+
+    code {
+      background: #eff6ff;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Hello Docker Frontend</h1>
+    <p>这是前后端分离版本：前端页面运行在 <code>8080</code>，后端 API 运行在 <code>3001</code>。</p>
+
+    <section class="card">
+      <h2>写一条留言</h2>
+      <form id="message-form">
+        <input id="name" name="name" maxlength="50" placeholder="你的名字" required>
+        <textarea id="content" name="content" maxlength="280" placeholder="输入一条留言" required></textarea>
+        <button id="submit-button" type="submit">提交</button>
+      </form>
+      <div id="status" class="status"></div>
+    </section>
+
+    <section class="card">
+      <h2>最近留言</h2>
+      <ul id="message-list"></ul>
+    </section>
+  </main>
+
+  <script>
+    const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:3001`;
+    const form = document.getElementById("message-form");
+    const statusEl = document.getElementById("status");
+    const listEl = document.getElementById("message-list");
+    const submitButton = document.getElementById("submit-button");
+
+    async function loadMessages() {
+      const response = await fetch(`${apiBaseUrl}/api/messages`);
+      const messages = await response.json();
+
+      listEl.innerHTML = "";
+
+      if (!messages.length) {
+        listEl.innerHTML = "<li>还没有留言，来写第一条吧。</li>";
+        return;
+      }
+
+      for (const message of messages) {
+        const item = document.createElement("li");
+        const createdAt = new Date(message.created_at).toLocaleString("zh-CN");
+        item.innerHTML = `
+          <div class="meta">${message.name} · ${createdAt}</div>
+          <div>${message.content}</div>
+        `;
+        listEl.appendChild(item);
+      }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      statusEl.textContent = "正在提交...";
+      submitButton.disabled = true;
+
+      const payload = {
+        name: form.name.value.trim(),
+        content: form.content.value.trim(),
+      };
+
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/messages`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || "提交失败");
+        }
+
+        form.reset();
+        statusEl.textContent = "提交成功";
+        await loadMessages();
+      } catch (error) {
+        statusEl.textContent = error.message;
+      } finally {
+        submitButton.disabled = false;
+      }
+    });
+
+    loadMessages().catch((error) => {
+      statusEl.textContent = `加载失败: ${error.message}`;
+    });
+  </script>
+</body>
+</html>

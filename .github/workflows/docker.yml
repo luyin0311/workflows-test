@@ -5,17 +5,21 @@ on:
     branches:
       - main
   pull_request:
-
-permissions:
-  contents: read
-  packages: write
+  workflow_dispatch:
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/hello-docker
+  FRONTEND_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/hello-docker-frontend
+  BACKEND_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/hello-docker-backend
+
+concurrency:
+  group: docker-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-test-publish:
+  smoke-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -24,48 +28,91 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Generate image metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build image for test
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          load: true
-          tags: hello-docker:test
+      - name: Start full stack
+        run: docker compose up -d --build
 
       - name: Run smoke test
         run: |
-          docker run -d --rm --name hello-docker-test -p 8080:80 hello-docker:test
-          for i in 1 2 3 4 5; do
-            if curl -fsS http://localhost:8080 | grep -q "Hello, Docker!"; then
-              exit 0
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS http://localhost:3001/api/health | grep -q '"status":"ok"' &&
+               curl -fsS http://localhost:8080 | grep -q "Hello Docker Frontend"; then
+              break
             fi
-            sleep 2
+            sleep 3
           done
-          echo "Smoke test failed"
-          docker logs hello-docker-test
-          exit 1
+
+          curl -fsS http://localhost:3001/api/health | grep -q '"status":"ok"'
+          curl -fsS http://localhost:8080 | grep -q "Hello Docker Frontend"
+
+          curl -fsS -X POST http://localhost:3001/api/messages \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"GitHub Actions","content":"Smoke test message"}' \
+            | grep -q '"name":"GitHub Actions"'
+
+      - name: Show compose logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
+  publish-images:
+    runs-on: ubuntu-latest
+    needs: smoke-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Generate frontend image metadata
+        id: frontend_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.FRONTEND_IMAGE_NAME }}
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push frontend image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./frontend
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.frontend_meta.outputs.tags }}
+          labels: ${{ steps.frontend_meta.outputs.labels }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Generate backend image metadata
+        id: backend_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BACKEND_IMAGE_NAME }}
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ steps.backend_meta.outputs.tags }}
+          labels: ${{ steps.backend_meta.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
